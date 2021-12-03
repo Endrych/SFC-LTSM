@@ -28,10 +28,8 @@ class LTSM:
             index = random.randint(0, input_data.shape[0] - 1)
             data = input_data[index]
             targets = ground_truth[index]
-            h_states, h_cache = self.forward(data)
+            predict, h_states, h_cache = self.forward(data)
 
-            scores = np.dot(h_states, self.Why.T) + self.by  # (seq_length, input_dim)
-            predict = activation('sigmoid', scores)
             loss = self.loss_function(predict, targets)
             if i % 100 == 0:
                 print('{}/{}: {}'.format(i, iterations, loss))
@@ -39,20 +37,7 @@ class LTSM:
             smooth_loss.append(smooth_loss[-1] * 0.999 + loss_list[-1] * 0.001)
 
             # Backward pass
-            dscores = (predict - targets) * (predict * (1.0 - predict))
-            # dscores = (np.exp(-dscores))/(np.power(1 + np.exp(-dscores), 2))
-            dWhy = dscores.T.dot(h_states)
-            dby = np.sum(dscores, axis=0)
-            dh_states = dscores.dot(self.Why)
-            dx, dh_0, dWx, dWh, db = self.backpropagation(dh_states, h_cache)
-
-            ### Gradient update ###
-            self.Wx -= self.learning_rate * dWx * 0.5
-            self.Wh -= self.learning_rate * dWh * 0.5
-            self.Why -= self.learning_rate * dWhy * 0.5
-            self.b -= self.learning_rate * db * 0.5
-            self.by -= self.learning_rate * dby * 0.5
-
+            self.backpropagation(predict, targets, h_states, h_cache)
             self.prev_h = h_states[-1][None]
 
         return loss_list, smooth_loss
@@ -61,9 +46,7 @@ class LTSM:
         data = []
         for i in range(input_data.shape[0]):
             input = input_data[i]
-            h_states, h_cache = self.forward(input)
-            scores = np.dot(h_states, self.Why.T) + self.by  # (seq_length, input_dim)
-            predict = activation('sigmoid', scores)
+            predict, h_states, h_cache = self.forward(input)
             data.append(predict)
 
         return np.array(data)
@@ -89,18 +72,24 @@ class LTSM:
         h = None
         cache = []
         prev_c = np.zeros_like(self.prev_h)
+        prev_h = np.zeros_like(self.prev_h)
         for i in range(x.shape[0]):  # 0 to seq_length-1
-            next_h, next_c, next_cache = self.step_forward(x[i][None], self.prev_h, prev_c, self.Wx, self.Wh, self.b)
+            next_h, next_c, next_cache = self.step_forward(x[i][None], prev_h, prev_c, self.Wx, self.Wh, self.b)
             self.prev_h = next_h
             prev_c = next_c
+            prev_h = next_h
             cache.append(next_cache)
             if i > 0:
                 h = np.append(h, next_h, axis=0)
             else:
                 h = next_h
-        return h, cache
 
-    def backpropagation(self, dh, cache):
+        scores = np.dot(h, self.Why.T) + self.by  # (seq_length, input_dim)
+        predict = activation('sigmoid', scores)
+
+        return predict, h, cache
+
+    def backpropagation(self, predict, targets, h_states, cache):
         """
         Backward pass for an LSTM over an entire sequence of data.]
         Inputs:
@@ -113,13 +102,17 @@ class LTSM:
         - dWh: Gradient of hidden-to-hidden weight matrix of shape (H, 4H)
         - db: Gradient of biases, of shape (4H,)
         """
-
+        dscores = (predict - targets) * (predict * (1.0 - predict))
+        # dscores = (np.exp(-dscores))/(np.power(1 + np.exp(-dscores), 2))
+        dWhy = dscores.T.dot(h_states)
+        dby = np.sum(dscores, axis=0)
+        dh_states = dscores.dot(self.Why)
         dx, dh0, dWx, dWh, db = None, None, None, None, None
-        N, H = dh.shape
+        N, H = dh_states.shape
         dh_prev = 0
         dc_prev = 0
         for i in reversed(range(N)):
-            dx_step, dh0_step, dc_step, dWx_step, dWh_step, db_step = self.step_backward(dh[i][None] + dh_prev, dc_prev,
+            dx_step, dh0_step, dc_step, dWx_step, dWh_step, db_step = self.step_backward(dh_states[i][None] + dh_prev, dc_prev,
                                                                                          cache[i])
             dh_prev = dh0_step
             dc_prev = dc_step
@@ -134,6 +127,14 @@ class LTSM:
                 dWh += dWh_step
                 db += db_step
         dh0 = dh0_step
+
+        ### Gradient update ###
+        self.Wx -= self.learning_rate * dWx * 0.5
+        self.Wh -= self.learning_rate * dWh * 0.5
+        self.Why -= self.learning_rate * dWhy * 0.5
+        self.b -= self.learning_rate * db * 0.5
+        self.by -= self.learning_rate * dby * 0.5
+
         return dx, dh0, dWx, dWh, db
 
     def step_forward(self, x, prev_h, prev_c, Wx, Wh, b):
@@ -160,7 +161,7 @@ class LTSM:
         o = activation('sigmoid', a[:, 2 * H:3 * H])
         g = activation('tanh', a[:, 3 * H:4 * H])  # (1, hidden_dim)
         next_c = f * prev_c + i * g  # (1, hidden_dim)
-        next_h = o * (np.tanh(next_c))  # (1, hidden_dim)
+        next_h = o * (activation('tanh', next_c))  # (1, hidden_dim)
         cache = x, prev_h, prev_c, Wx, Wh, b, a, i, f, o, g, next_c
         return next_h, next_c, cache
 

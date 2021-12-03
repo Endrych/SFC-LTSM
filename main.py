@@ -7,11 +7,12 @@ import matplotlib.pyplot as plt
 import locale
 locale.setlocale(locale.LC_ALL, 'en_US.UTF-8')
 
+sequence_length = 60
 
 def main():
     # Importing the training set
     dataset_train = pd.read_csv('Google_Stock_Price_Train.csv')
-    training_set = dataset_train.iloc[:, 1:2].values
+    training_set = dataset_train.iloc[:, 1:5].values
     training_set_shape = training_set.shape
     for x in range(training_set_shape[0]):
         for y in range(training_set_shape[1]):
@@ -25,9 +26,9 @@ def main():
     # Creating a data structure with 60 timesteps and 1 output;
     X_train = []
     y_train = []
-    for i in range(61, 1258):
-        X_train.append(training_set_scaled[i - 61:i-1, :])
-        y_train.append(training_set_scaled[i - 60:i, :])
+    for i in range(sequence_length + 1, 1258):
+        X_train.append(training_set_scaled[i - (sequence_length + 1):i-1, :])
+        y_train.append(training_set_scaled[i - sequence_length:i, :])
     X_train, y_train = np.array(X_train), np.array(y_train)
 
     model = LTSM(X_train.shape[2], X_train.shape[1], hidden_dim=4)
@@ -38,7 +39,7 @@ def main():
     plt.plot(smooth_loss, color="orange")
     plt.show()
     dataset_test = pd.read_csv('Google_Stock_Price_Test.csv')
-    real_stock_price = dataset_test.iloc[:, 1:2].values
+    real_stock_price = dataset_test.iloc[:, 1:5].values
     test_set_shape = real_stock_price.shape
     for x in range(test_set_shape[0]):
         for y in range(test_set_shape[1]):
@@ -50,13 +51,13 @@ def main():
     y_test = []
     test_set = np.concatenate((training_set_scaled, test_set_scaled), axis=0)
     for i in range(61, 1278):
-        X_test.append(test_set[i - 61:i - 1, :])
-        y_test.append(test_set[i - 60:i, :])
+        X_test.append(test_set[i - (sequence_length + 1):i - 1, :])
+        y_test.append(test_set[i - sequence_length:i, :])
     X_test, y_test = np.array(X_test), np.array(y_test)
     predicted = model.predict(X_test)
-    predicted = predicted[:, 59, :]
+    predicted = predicted[:, sequence_length-1, :]
     predicted = sc.inverse_transform(predicted)
-    y_test = y_test[:, 59, :]
+    y_test = y_test[:, sequence_length-1, :]
     y_test = sc.inverse_transform(y_test)
     open_real = []
     open_predicted = []
