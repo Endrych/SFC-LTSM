@@ -1,17 +1,17 @@
 import random
 from pickle import dump, load
-
 import numpy as np
-
 from activations import activation
-
+from debugger import Debugger
 
 class LTSM:
-    def __init__(self, input_dimension, sequence_length=60, hidden_dim=250, learning_rate=1e-2) -> None:
+    def __init__(self, input_dimension, sequence_length=60, hidden_dim=250, learning_rate=1e-2, debug=False) -> None:
         self.input_dimension = input_dimension
         self.learning_rate = learning_rate
         self.hidden_dim = hidden_dim
         self.sequence_length = sequence_length
+        self.debug = debug
+        self.debugger = Debugger(debug)
 
         # model parameters
         self.Wx = np.random.randn(input_dimension, 4 * hidden_dim) / np.sqrt(4 * hidden_dim)  # input to hidden
@@ -25,11 +25,11 @@ class LTSM:
         loss_list = [-np.log(1.0 / self.input_dimension)]
         smooth_loss = loss_list.copy()
         for i in range(1, iterations + 1):
+            self.debugger.start_iteration(i)
             index = random.randint(0, input_data.shape[0] - 1)
             data = input_data[index]
             targets = ground_truth[index]
             predict, h_states, h_cache = self.forward(data)
-
             loss = self.loss_function(predict, targets)
             if i % 100 == 0:
                 print('{}/{}: {}'.format(i, iterations, loss))
@@ -73,7 +73,8 @@ class LTSM:
         cache = []
         prev_c = np.zeros_like(self.prev_h)
         prev_h = np.zeros_like(self.prev_h)
-        for i in range(x.shape[0]):  # 0 to seq_length-1
+        for i in range(self.sequence_length):  # 0 to seq_length-1
+            self.debugger.start_sequence(i + 1, self.sequence_length)
             next_h, next_c, next_cache = self.step_forward(x[i][None], prev_h, prev_c, self.Wx, self.Wh, self.b)
             self.prev_h = next_h
             prev_c = next_c
@@ -155,13 +156,22 @@ class LTSM:
         - cache: Tuple of values needed for backward pass.
         """
         _, H = prev_h.shape
+        self.debugger.step_forward(x, prev_h, prev_c)
         a = prev_h.dot(Wh) + x.dot(Wx) + b  # (1, 4*hidden_dim)
         i = activation('sigmoid', a[:, 0:H])
+        self.debugger.print_gate_info("Input gate", Wh[:, 0:H], Wx[:, 0:H], b[0:H], a[:, 0:H], 'sigmoid', i)
         f = activation('sigmoid', a[:, H:2 * H])
+        self.debugger.print_gate_info("Forget gate", Wh[:, H:2 * H], Wx[:, H:2 * H], b[H:2 * H], a[:, H:2 * H],
+                                      'sigmoid', f)
         o = activation('sigmoid', a[:, 2 * H:3 * H])
+        self.debugger.print_gate_info("Output gate", Wh[:, 2 * H:3 * H], Wx[:, 2 * H:3 * H], b[2 * H:3 * H],
+                                      a[:, 2 * H:3 * H], 'sigmoid', o)
         g = activation('tanh', a[:, 3 * H:4 * H])  # (1, hidden_dim)
+        self.debugger.print_gate_info("Candidate gate", Wh[:, 3 * H:4 * H], Wx[:, 3 * H:4 * H], b[3 * H:4 * H],
+                                      a[:, 3 * H:4 * H], 'tanh', g)
         next_c = f * prev_c + i * g  # (1, hidden_dim)
         next_h = o * (activation('tanh', next_c))  # (1, hidden_dim)
+        self.debugger.step_forward_output(next_c, next_h)
         cache = x, prev_h, prev_c, Wx, Wh, b, a, i, f, o, g, next_c
         return next_h, next_c, cache
 
