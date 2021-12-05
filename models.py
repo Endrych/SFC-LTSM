@@ -31,7 +31,7 @@ class LTSM:
             targets = ground_truth[index]
             predict, h_states, h_cache = self.forward(data)
             loss = self.loss_function(predict, targets)
-            if i % 100 == 0:
+            if not self.debug and i % 100 == 0:
                 print('{}/{}: {}'.format(i, iterations, loss))
             loss_list.append(loss)
             smooth_loss.append(smooth_loss[-1] * 0.999 + loss_list[-1] * 0.001)
@@ -87,6 +87,7 @@ class LTSM:
 
         scores = np.dot(h, self.Why.T) + self.by  # (seq_length, input_dim)
         predict = activation('sigmoid', scores)
+        self.debugger.forward_output(h, self.Why.T, self.by, scores, predict)
 
         return predict, h, cache
 

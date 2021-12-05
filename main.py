@@ -10,7 +10,7 @@ import argparse
 def main(sequence_length, hidden_dim, iterations, debug):
     # Importing the training set
     dataset_train = pd.read_csv('train.csv', header=None)
-    training_set = dataset_train.values
+    training_set = dataset_train.values[:, :1]
 
     # Feature Scaling
     sc = MinMaxScaler(feature_range=(0, 1))

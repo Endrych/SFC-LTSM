@@ -15,6 +15,7 @@ class Debugger:
 
     def start_sequence(self, current_sequence, sequence_length):
         if self.activated:
+            print("")
             print("Current sequence {}/{}".format(current_sequence, sequence_length))
 
     def print_vector(self, label, vector):
@@ -51,6 +52,7 @@ class Debugger:
             self.wait_on_key()
 
     def step_forward_output(self, next_c, next_h):
+        print("")
         print("Step forward output")
         print("==============")
         print("next_c = f * prev_c + i * g")
@@ -65,6 +67,19 @@ class Debugger:
             self.print_vector("prev_h:", prev_h)
             self.print_vector("prev_c:", prev_c)
             self.wait_on_key()
+
+    def forward_output(self, h, WhyT, by, scores, predict):
+        print("")
+        print("Forward output")
+        print("==============")
+        self.print_matrix("h:", h)
+        self.print_matrix("WhyT:", WhyT)
+        self.print_vector("by", np.array([by]))
+        print("scores = np.dot(h, self.Why.T) + self.by")
+        self.print_vector("scores:", scores.T)
+        print("predict = sigmoid(scores)")
+        self.print_vector("predict:", predict.T)
+        self.wait_on_key()
 
     def wait_on_key(self):
         if self.activated:
