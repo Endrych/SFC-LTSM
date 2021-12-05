@@ -1,17 +1,17 @@
 import random
-from pickle import dump, load
 import numpy as np
 from activations import activation
-from debugger import Debugger
+from stepper import Stepper
+
 
 class LTSM:
-    def __init__(self, input_dimension, sequence_length=60, hidden_dim=250, learning_rate=1e-2, debug=False) -> None:
+    def __init__(self, input_dimension, sequence_length=60, hidden_dim=250, learning_rate=1e-2, stepper_enabled=False) -> None:
         self.input_dimension = input_dimension
         self.learning_rate = learning_rate
         self.hidden_dim = hidden_dim
         self.sequence_length = sequence_length
-        self.debug = debug
-        self.debugger = Debugger(debug)
+        self.stepper_enabled = stepper_enabled
+        self.stepper = Stepper(stepper_enabled)
 
         # model parameters
         self.Wx = np.random.randn(input_dimension, 4 * hidden_dim) / np.sqrt(4 * hidden_dim)  # input to hidden
@@ -25,13 +25,13 @@ class LTSM:
         loss_list = [-np.log(1.0 / self.input_dimension)]
         smooth_loss = loss_list.copy()
         for i in range(1, iterations + 1):
-            self.debugger.start_iteration(i)
+            self.stepper.start_iteration(i)
             index = random.randint(0, input_data.shape[0] - 1)
             data = input_data[index]
             targets = ground_truth[index]
             predict, h_states, h_cache = self.forward(data)
             loss = self.loss_function(predict, targets)
-            if not self.debug and i % 100 == 0:
+            if not self.stepper_enabled and i % 100 == 0:
                 print('{}/{}: {}'.format(i, iterations, loss))
             loss_list.append(loss)
             smooth_loss.append(smooth_loss[-1] * 0.999 + loss_list[-1] * 0.001)
@@ -74,7 +74,7 @@ class LTSM:
         prev_c = np.zeros_like(self.prev_h)
         prev_h = np.zeros_like(self.prev_h)
         for i in range(self.sequence_length):  # 0 to seq_length-1
-            self.debugger.start_sequence(i + 1, self.sequence_length)
+            self.stepper.start_sequence(i + 1, self.sequence_length)
             next_h, next_c, next_cache = self.step_forward(x[i][None], prev_h, prev_c, self.Wx, self.Wh, self.b)
             self.prev_h = next_h
             prev_c = next_c
@@ -87,7 +87,7 @@ class LTSM:
 
         scores = np.dot(h, self.Why.T) + self.by  # (seq_length, input_dim)
         predict = activation('sigmoid', scores)
-        self.debugger.forward_output(h, self.Why.T, self.by, scores, predict)
+        self.stepper.forward_output(h, self.Why.T, self.by, scores, predict)
 
         return predict, h, cache
 
@@ -105,7 +105,7 @@ class LTSM:
         - db: Gradient of biases, of shape (4H,)
         """
         dscores = (predict - targets) * (predict * (1.0 - predict))
-        # dscores = (np.exp(-dscores))/(np.power(1 + np.exp(-dscores), 2))
+        self.stepper.backpropagation_start(predict.T, targets.T)
         dWhy = dscores.T.dot(h_states)
         dby = np.sum(dscores, axis=0)
         dh_states = dscores.dot(self.Why)
@@ -131,11 +131,30 @@ class LTSM:
         dh0 = dh0_step
 
         ### Gradient update ###
-        self.Wx -= self.learning_rate * dWx * 0.5
-        self.Wh -= self.learning_rate * dWh * 0.5
-        self.Why -= self.learning_rate * dWhy * 0.5
-        self.b -= self.learning_rate * db * 0.5
-        self.by -= self.learning_rate * dby * 0.5
+        deltaWx = self.learning_rate * dWx * 0.5
+        new_Wx = self.Wx - deltaWx
+        self.stepper.gradient_update('Wx', self.Wx, deltaWx, new_Wx, True)
+        self.Wx = new_Wx
+
+        deltaWh = self.learning_rate * dWh * 0.5
+        new_Wh = self.Wh - deltaWh
+        self.stepper.gradient_update('Wh', self.Wh, deltaWh, new_Wh, False)
+        self.Wh = new_Wh
+
+        deltaWhy = self.learning_rate * dWhy * 0.5
+        new_Why = self.Why - deltaWhy
+        self.stepper.gradient_update('Why', self.Why, deltaWhy, new_Why, True)
+        self.Why = new_Why
+
+        delta_b = self.learning_rate * db * 0.5
+        new_b = self.b - delta_b
+        self.stepper.gradient_update('b', np.array([self.b.T]), np.array([delta_b.T]), np.array([new_b.T]), True)
+        self.b = new_b
+
+        delta_by = self.learning_rate * dby * 0.5
+        new_by = self.by - delta_by
+        self.stepper.gradient_update('by', np.array([self.by.T]), np.array([delta_by.T]), np.array([new_by.T]), True)
+        self.by = new_by
 
         return dx, dh0, dWx, dWh, db
 
@@ -157,22 +176,22 @@ class LTSM:
         - cache: Tuple of values needed for backward pass.
         """
         _, H = prev_h.shape
-        self.debugger.step_forward(x, prev_h, prev_c)
+        self.stepper.step_forward(x, prev_h, prev_c)
         a = prev_h.dot(Wh) + x.dot(Wx) + b  # (1, 4*hidden_dim)
         i = activation('sigmoid', a[:, 0:H])
-        self.debugger.print_gate_info("Input gate", Wh[:, 0:H], Wx[:, 0:H], b[0:H], a[:, 0:H], 'sigmoid', i)
+        self.stepper.print_gate_info("Input gate", Wh[:, 0:H], Wx[:, 0:H], b[0:H], a[:, 0:H], 'sigmoid', i)
         f = activation('sigmoid', a[:, H:2 * H])
-        self.debugger.print_gate_info("Forget gate", Wh[:, H:2 * H], Wx[:, H:2 * H], b[H:2 * H], a[:, H:2 * H],
+        self.stepper.print_gate_info("Forget gate", Wh[:, H:2 * H], Wx[:, H:2 * H], b[H:2 * H], a[:, H:2 * H],
                                       'sigmoid', f)
         o = activation('sigmoid', a[:, 2 * H:3 * H])
-        self.debugger.print_gate_info("Output gate", Wh[:, 2 * H:3 * H], Wx[:, 2 * H:3 * H], b[2 * H:3 * H],
+        self.stepper.print_gate_info("Output gate", Wh[:, 2 * H:3 * H], Wx[:, 2 * H:3 * H], b[2 * H:3 * H],
                                       a[:, 2 * H:3 * H], 'sigmoid', o)
         g = activation('tanh', a[:, 3 * H:4 * H])  # (1, hidden_dim)
-        self.debugger.print_gate_info("Candidate gate", Wh[:, 3 * H:4 * H], Wx[:, 3 * H:4 * H], b[3 * H:4 * H],
+        self.stepper.print_gate_info("Candidate gate", Wh[:, 3 * H:4 * H], Wx[:, 3 * H:4 * H], b[3 * H:4 * H],
                                       a[:, 3 * H:4 * H], 'tanh', g)
         next_c = f * prev_c + i * g  # (1, hidden_dim)
         next_h = o * (activation('tanh', next_c))  # (1, hidden_dim)
-        self.debugger.step_forward_output(next_c, next_h)
+        self.stepper.step_forward_output(next_c, next_h)
         cache = x, prev_h, prev_c, Wx, Wh, b, a, i, f, o, g, next_c
         return next_h, next_c, cache
 
@@ -210,19 +229,3 @@ class LTSM:
         dWx = x.T.dot(da)
         dWh = prev_h.T.dot(da)
         return dx, dprev_h, dprev_c, dWx, dWh, db
-
-    def save(self, filename):
-        a_file = open(filename, "wb")
-        dump({'Wx': self.Wx, 'Wh': self.Wh, 'b': self.b, 'Why': self.Why, 'by': self.by, 'prev_h': self.prev_h}, a_file)
-        a_file.close()
-
-    def load(self, filename):
-        a_file = open(filename, "rb")
-        output = load(a_file)
-        self.Wx = output['Wx']
-        self.Wh = output['Wh']
-        self.b = output['b']
-        self.Why = output['Why']
-        self.by = output['by']
-        self.prev_h = output['prev_h']
-        a_file.close()
